@@ -1,0 +1,55 @@
+# =============================================================================
+# PDF-Chatbot-V2 — Docker Compose Configuration
+# =============================================================================
+# Runs the inference-only serving container with Ollama + FastAPI.
+#
+# Usage:
+#   docker-compose up --build        # Build and start
+#   docker-compose up -d             # Start in background
+#   docker-compose down              # Stop and remove
+#
+# GPU Support:
+#   Requires NVIDIA Container Toolkit installed on host.
+#   Falls back to CPU if GPU is not available.
+# =============================================================================
+
+services:
+  pdf-chatbot-serve:
+    build:
+      context: .
+      dockerfile: Dockerfile.serve
+    container_name: pdf-chatbot-v2
+    image: pdf-chatbot-v2:latest
+
+    ports:
+      - "8000:8000"     # FastAPI Web UI
+      - "11434:11434"   # Ollama API
+
+    volumes:
+      # Mount vectorstore for live index updates without container rebuild
+      - ./vectorstore:/app/vectorstore
+
+    environment:
+      - OLLAMA_BASE_URL=http://localhost:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    # GPU passthrough (requires NVIDIA Container Toolkit)
+    # Comment out the deploy section for CPU-only mode
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+    restart: unless-stopped

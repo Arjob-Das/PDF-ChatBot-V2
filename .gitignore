@@ -89,3 +89,8 @@ huggingface/
 scratch/
 scratch_*.py
 *.tmp
+
+# --- Docker ---
+.dockerignore
+docker-data/
+*.tar

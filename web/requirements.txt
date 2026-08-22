@@ -1,0 +1,15 @@
+# PDF-Chatbot-V2 — Web Application Dependencies
+# ================================================
+# FastAPI backend + SSE streaming for the web chatbot UI.
+# Install: pip install -r web/requirements.txt
+#
+# Note: Query-time dependencies (chromadb, sentence-transformers, etc.)
+# are inherited from the main requirements.txt.
+
+# --- Web Framework ---
+fastapi>=0.104.0                 # High-performance async web framework
+uvicorn[standard]>=0.24.0       # ASGI server with hot-reload
+sse-starlette>=1.6.0            # Server-Sent Events for streaming responses
+
+# --- Utilities ---
+python-multipart>=0.0.6         # Form data parsing for FastAPI

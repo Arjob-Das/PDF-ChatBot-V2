@@ -1,0 +1,381 @@
+"""
+PDF-Chatbot-V2 — FastAPI Web Application
+=========================================
+RESTful + SSE streaming API that connects to the existing RAG pipeline
+(Retriever, OllamaClient, ConversationMemory) and serves a premium
+web chatbot interface.
+
+Endpoints:
+    GET  /              — Serves the static chatbot UI
+    POST /api/chat      — Chat with streaming SSE response
+    GET  /api/health    — System health and status
+    POST /api/clear     — Clear session conversation memory
+    GET  /api/sources   — Last retrieval sources for a session
+
+Usage:
+    uvicorn web.app:app --host 0.0.0.0 --port 8000 --reload
+"""
+
+import json
+import logging
+import sys
+import time
+import uuid
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
+
+# ──────────────────────────────────────────────
+# Path setup — ensure project root is importable
+# ──────────────────────────────────────────────
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+import config
+from query import (
+    ConversationMemory,
+    OllamaClient,
+    Retriever,
+    QUERY_TEMPLATE,
+    SYSTEM_PROMPT,
+)
+from utils import setup_logging
+
+# ──────────────────────────────────────────────
+# Logging
+# ──────────────────────────────────────────────
+setup_logging()
+logger = logging.getLogger("pdf_chatbot_v2.web")
+
+# ──────────────────────────────────────────────
+# FastAPI Application
+# ──────────────────────────────────────────────
+app = FastAPI(
+    title="PDF-Chatbot-V2 Web API",
+    description="Hybrid RAG chatbot with streaming responses",
+    version="2.0.0",
+)
+
+# CORS for local development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ──────────────────────────────────────────────
+# Static Files
+# ──────────────────────────────────────────────
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+
+# ──────────────────────────────────────────────
+# Global Components (initialized on startup)
+# ──────────────────────────────────────────────
+retriever: Retriever | None = None
+llm: OllamaClient | None = None
+
+# Session-based conversation memory store
+sessions: dict[str, ConversationMemory] = {}
+# Session-based last retrieval results
+session_sources: dict[str, list[dict]] = {}
+
+
+def get_or_create_session(session_id: str) -> ConversationMemory:
+    """Get or create a conversation memory for the given session."""
+    if session_id not in sessions:
+        sessions[session_id] = ConversationMemory()
+        logger.info(f"New session created: {session_id[:8]}...")
+    return sessions[session_id]
+
+
+# ──────────────────────────────────────────────
+# Startup / Shutdown Events
+# ──────────────────────────────────────────────
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the RAG pipeline components on server startup."""
+    global retriever, llm
+    logger.info("🚀 PDF-Chatbot-V2 Web Server starting...")
+
+    try:
+        retriever = Retriever()
+        logger.info(
+            f"✅ Retriever initialized — "
+            f"{retriever.count()} documents in vector store"
+        )
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Retriever: {e}")
+        logger.error("   Run 'python ingest.py' first to create the index.")
+
+    try:
+        llm = OllamaClient()
+        logger.info(f"✅ Ollama connected — model: {llm.model}")
+    except SystemExit:
+        logger.error(
+            "❌ Cannot connect to Ollama. "
+            "Make sure Ollama is running: 'ollama serve'"
+        )
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Ollama client: {e}")
+
+
+# ──────────────────────────────────────────────
+# Request / Response Models
+# ──────────────────────────────────────────────
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str = ""
+
+
+class ClearRequest(BaseModel):
+    session_id: str = ""
+
+
+# ──────────────────────────────────────────────
+# API Endpoints
+# ──────────────────────────────────────────────
+
+
+@app.get("/")
+async def serve_ui():
+    """Serve the chatbot web interface."""
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path), media_type="text/html")
+    return JSONResponse(
+        status_code=404,
+        content={"error": "UI not found. Ensure web/static/index.html exists."},
+    )
+
+
+@app.post("/api/chat")
+async def chat_endpoint(request: ChatRequest):
+    """
+    Chat endpoint with Server-Sent Events (SSE) streaming.
+    Streams tokens as they are generated by the LLM.
+    """
+    if not retriever or not llm:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "RAG pipeline not initialized. "
+                "Check server logs for details."
+            },
+        )
+
+    session_id = request.session_id or str(uuid.uuid4())
+    memory = get_or_create_session(session_id)
+    question = request.message.strip()
+
+    if not question:
+        return JSONResponse(
+            status_code=400, content={"error": "Message cannot be empty."}
+        )
+
+    logger.info(f"[{session_id[:8]}] Query: {question}")
+
+    # Step 1: Hybrid retrieval + Re-ranking
+    results = retriever.search(question, top_k=config.TOP_K)
+    context = retriever.format_context(results)
+    session_sources[session_id] = results
+
+    # Step 2: Build prompt with conversation history
+    history = memory.format_history()
+    prompt = QUERY_TEMPLATE.format(
+        context=context, history=history, question=question
+    )
+
+    # Step 3: Stream response via SSE
+    async def event_generator():
+        """Generate SSE events for streaming LLM output."""
+        start = time.time()
+        full_response = []
+
+        try:
+            # Build payload for Ollama API
+            payload = {
+                "model": llm.model,
+                "prompt": prompt,
+                "system": SYSTEM_PROMPT,
+                "stream": True,
+                "options": {
+                    "num_ctx": config.OLLAMA_CONTEXT_WINDOW,
+                    "temperature": 0.3,
+                    "top_p": 0.9,
+                    "repeat_penalty": 1.1,
+                },
+            }
+
+            import requests as http_requests
+
+            response = http_requests.post(
+                f"{llm.base_url}/api/generate",
+                json=payload,
+                stream=True,
+                timeout=llm.timeout,
+            )
+            response.raise_for_status()
+
+            for line in response.iter_lines():
+                if line:
+                    data = json.loads(line)
+                    token = data.get("response", "")
+                    if token:
+                        full_response.append(token)
+                        yield {
+                            "event": "token",
+                            "data": json.dumps({"token": token}),
+                        }
+                    if data.get("done", False):
+                        break
+
+        except http_requests.ConnectionError:
+            yield {
+                "event": "error",
+                "data": json.dumps(
+                    {"error": "Lost connection to Ollama. Is it still running?"}
+                ),
+            }
+            return
+        except http_requests.Timeout:
+            yield {
+                "event": "error",
+                "data": json.dumps(
+                    {"error": f"Ollama timed out after {llm.timeout}s."}
+                ),
+            }
+            return
+        except Exception as e:
+            yield {
+                "event": "error",
+                "data": json.dumps({"error": str(e)}),
+            }
+            return
+
+        # Finalize
+        answer = "".join(full_response).strip()
+        elapsed = time.time() - start
+
+        # Update conversation memory
+        memory.add_turn("user", question)
+        memory.add_turn("assistant", answer)
+
+        # Build source citations
+        sources = []
+        for r in results:
+            meta = r.get("metadata", {})
+            sources.append(
+                {
+                    "source": meta.get("source", "Unknown"),
+                    "page": meta.get("page", "?"),
+                    "file_path": meta.get("file_path", ""),
+                    "content_type": meta.get("content_type", "prose"),
+                }
+            )
+
+        # Send completion event
+        yield {
+            "event": "done",
+            "data": json.dumps(
+                {
+                    "session_id": session_id,
+                    "elapsed": round(elapsed, 1),
+                    "sources": sources,
+                    "memory_turns": memory.turn_count,
+                }
+            ),
+        }
+
+    return EventSourceResponse(event_generator())
+
+
+@app.get("/api/health")
+async def health_endpoint():
+    """Return system health status."""
+    ollama_status = "disconnected"
+    model_name = config.OLLAMA_MODEL
+    vectorstore_count = 0
+
+    if llm:
+        try:
+            import requests as http_requests
+
+            resp = http_requests.get(
+                f"{llm.base_url}/api/tags", timeout=3
+            )
+            if resp.status_code == 200:
+                ollama_status = "connected"
+                model_name = llm.model
+        except Exception:
+            pass
+
+    if retriever:
+        try:
+            vectorstore_count = retriever.count()
+        except Exception:
+            pass
+
+    return {
+        "status": "healthy" if ollama_status == "connected" and retriever else "degraded",
+        "ollama": ollama_status,
+        "model": model_name,
+        "vectorstore_documents": vectorstore_count,
+        "active_sessions": len(sessions),
+        "hybrid_search": bool(retriever and retriever.bm25),
+        "reranker": bool(retriever and retriever.reranker),
+    }
+
+
+@app.post("/api/clear")
+async def clear_endpoint(request: ClearRequest):
+    """Clear conversation memory for a session."""
+    session_id = request.session_id
+    if session_id in sessions:
+        sessions[session_id].clear()
+        session_sources.pop(session_id, None)
+        logger.info(f"[{session_id[:8]}] Memory cleared")
+        return {"status": "cleared", "session_id": session_id}
+    return {"status": "no_session", "session_id": session_id}
+
+
+@app.get("/api/sources")
+async def sources_endpoint(session_id: str = ""):
+    """Return last retrieval sources for a session."""
+    results = session_sources.get(session_id, [])
+    if not results:
+        return {"sources": [], "message": "No previous retrieval for this session."}
+
+    sources = []
+    for i, r in enumerate(results, 1):
+        meta = r.get("metadata", {})
+
+        if "rerank_score" in r:
+            score = f"Rerank: {r['rerank_score']:.3f}"
+        elif "rrf_score" in r:
+            score = f"RRF: {r['rrf_score']:.4f}"
+        elif "distance" in r:
+            score = f"{(1.0 - r['distance']):.1%}"
+        else:
+            score = "N/A"
+
+        sources.append(
+            {
+                "rank": i,
+                "source": meta.get("source", "Unknown"),
+                "page": meta.get("page", "?"),
+                "content_type": meta.get("content_type", "prose"),
+                "score": score,
+                "preview": r["text"][:120].replace("\n", " ") + "...",
+            }
+        )
+
+    return {"sources": sources}

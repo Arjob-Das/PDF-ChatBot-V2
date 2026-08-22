@@ -97,3 +97,9 @@ MAX_MEMORY_TURNS = 5                     # Sliding window of past Q-A turns
 # Logging
 # ──────────────────────────────────────────────
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# ──────────────────────────────────────────────
+# Web Server (FastAPI)
+# ──────────────────────────────────────────────
+SERVE_HOST = os.getenv("SERVE_HOST", "0.0.0.0")
+SERVE_PORT = int(os.getenv("SERVE_PORT", "8000"))

@@ -1,0 +1,88 @@
+# =============================================================================
+# PDF-Chatbot-V2 — Docker Serving Image
+# =============================================================================
+# Hosts the trained vectorstore + Ollama for inference, served via FastAPI.
+#
+# Training/ingestion happens LOCALLY. This container is inference-only.
+#
+# Build:  docker build -f Dockerfile.serve -t pdf-chatbot-v2:latest .
+# Run:    docker run -p 8000:8000 -p 11434:11434 pdf-chatbot-v2:latest
+# =============================================================================
+
+FROM ollama/ollama:latest
+
+# ─────────────────────────────────────────────
+# 1. Install Python 3 and system dependencies
+# ─────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ─────────────────────────────────────────────
+# 2. Set up application directory
+# ─────────────────────────────────────────────
+WORKDIR /app
+
+# ─────────────────────────────────────────────
+# 3. Install Python dependencies (query-time only)
+# ─────────────────────────────────────────────
+COPY web/requirements.txt /app/web/requirements.txt
+
+# Install query-time Python dependencies
+RUN pip3 install --no-cache-dir --break-system-packages \
+    chromadb>=0.5.0 \
+    sentence-transformers>=3.0.0 \
+    torch>=2.0.0 \
+    einops>=0.8.0 \
+    rank-bm25>=0.2.2 \
+    requests>=2.31.0 \
+    numpy>=1.24.0 \
+    && pip3 install --no-cache-dir --break-system-packages \
+    -r /app/web/requirements.txt
+
+# ─────────────────────────────────────────────
+# 4. Copy application source code
+# ─────────────────────────────────────────────
+# Core modules needed for query/inference
+COPY config.py /app/config.py
+COPY query.py /app/query.py
+COPY utils.py /app/utils.py
+
+# Web application
+COPY web/ /app/web/
+
+# Entrypoint script
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# ─────────────────────────────────────────────
+# 5. Copy trained vectorstore (ChromaDB + BM25)
+# ─────────────────────────────────────────────
+# This gets overridden by docker-compose volume mount for live updates
+COPY vectorstore/ /app/vectorstore/
+
+# Create required directories
+RUN mkdir -p /app/data/pdfs /app/logs
+
+# ─────────────────────────────────────────────
+# 6. Expose ports
+# ─────────────────────────────────────────────
+# 8000 = FastAPI web server
+# 11434 = Ollama API
+EXPOSE 8000 11434
+
+# ─────────────────────────────────────────────
+# 7. Environment variables
+# ─────────────────────────────────────────────
+ENV OLLAMA_BASE_URL=http://localhost:11434
+ENV OLLAMA_MODEL=qwen3:8b
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+# ─────────────────────────────────────────────
+# 8. Entrypoint
+# ─────────────────────────────────────────────
+ENTRYPOINT ["/app/entrypoint.sh"]
