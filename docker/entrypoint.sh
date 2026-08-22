@@ -44,7 +44,16 @@ fi
 # ─────────────────────────────────────────────
 # 3. Pull the configured model if not present
 # ─────────────────────────────────────────────
-MODEL_NAME="${OLLAMA_MODEL:-qwen3:8b}"
+if [ "$FORCE_CPU" = "1" ] || [ "$CUDA_VISIBLE_DEVICES" = "" ] || [ "$OLLAMA_NUM_GPU" = "0" ]; then
+    DEFAULT_MODEL="qwen2.5:1.5b"
+    export OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+    export OMP_NUM_THREADS=${OMP_NUM_THREADS:-$(nproc 2>/dev/null || echo 4)}
+    echo "[*] Running in CPU-optimized mode (threads: $OMP_NUM_THREADS)"
+else
+    DEFAULT_MODEL="qwen2.5:7b"
+fi
+
+MODEL_NAME="${OLLAMA_MODEL:-$DEFAULT_MODEL}"
 echo "[*] Checking for model '$MODEL_NAME'..."
 
 MODEL_LIST=$(curl -s http://localhost:11434/api/tags | python3 -c "

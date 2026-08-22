@@ -50,6 +50,9 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 export PYTHONIOENCODING=utf-8
+if [ "$FORCE_CPU" -eq 1 ]; then
+    export FORCE_CPU=1
+fi
 
 # Determine total steps
 TOTAL_STEPS=7
@@ -200,13 +203,15 @@ fi
 
 # 4c. Pull model if needed
 if [ "$OLLAMA_RUNNING" -eq 1 ]; then
-    INSTALLED_COUNT=$(ollama list 2>/dev/null | sed 1d | grep -v '^$' | wc -l | tr -d ' ' || echo "0")
-    if [ "$INSTALLED_COUNT" -gt 0 ]; then
-        FIRST_MODEL=$(ollama list 2>/dev/null | sed 1d | awk 'NR==1{print $1}')
-        echo -e "  \033[0;32m[OK] Model available: '$FIRST_MODEL'\033[0m"
+    if [ "$FORCE_CPU" -eq 1 ]; then
+        TARGET_MODEL="qwen2.5:1.5b"
     else
-        TARGET_MODEL="qwen3:8b"
-        echo -e "  \033[1;33m[*] No models found. Pulling '$TARGET_MODEL' (may take several minutes)...\033[0m"
+        TARGET_MODEL="qwen2.5:7b"
+    fi
+    if ollama list 2>/dev/null | grep -q "$TARGET_MODEL"; then
+        echo -e "  \033[0;32m[OK] Model '$TARGET_MODEL' is available.\033[0m"
+    else
+        echo -e "  \033[1;33m[*] Model '$TARGET_MODEL' not found. Pulling '$TARGET_MODEL' (may take a minute)...\033[0m"
         ollama pull "$TARGET_MODEL"
         echo -e "  \033[0;32m[OK] Model '$TARGET_MODEL' pulled successfully.\033[0m"
     fi
@@ -411,6 +416,7 @@ if [ "$USE_GPU" = true ]; then
         --gpus all \
         -p 8000:8000 \
         -p 11434:11434 \
+        -e OLLAMA_MODEL="qwen2.5:7b" \
         -v "$VECTORSTORE_FULL:/app/vectorstore" \
         -v "$OLLAMA_HOST_DIR:/root/.ollama" \
         -v "$HF_HOST_DIR:/root/.cache/huggingface" \
@@ -422,6 +428,8 @@ else
         --name pdf-chatbot-v2 \
         -p 8000:8000 \
         -p 11434:11434 \
+        -e FORCE_CPU="1" \
+        -e OLLAMA_MODEL="qwen2.5:1.5b" \
         -e CUDA_VISIBLE_DEVICES="" \
         -e OLLAMA_NUM_GPU=0 \
         -v "$VECTORSTORE_FULL:/app/vectorstore" \

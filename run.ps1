@@ -45,6 +45,10 @@ for ($i = 0; $i -lt $args.Count; $i++) {
 
 $ErrorActionPreference = "Stop"
 
+if ($ForceCPU) {
+    $env:FORCE_CPU = "1"
+}
+
 # Set working directory to the script's root directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
@@ -230,16 +234,14 @@ if ($OllamaRunning) {
 
 # 4c. Pull model if needed (and Ollama is running)
 if ($OllamaRunning -and $OllamaCmd) {
+    $TargetModel = if ($ForceCPU) { "qwen2.5:1.5b" } else { "qwen2.5:7b" }
     $ModelsOutput = ""
     try { $ModelsOutput = & $OllamaCmd list 2>$null | Out-String } catch {}
 
-    $Lines = $ModelsOutput.Trim() -split "`r?`n"
-    if ($Lines.Count -gt 1) {
-        $FirstModel = ($Lines[1] -split "\s+")[0]
-        Write-Host "  [OK] Model available: '$FirstModel'" -ForegroundColor Green
+    if ($ModelsOutput -match [regex]::Escape($TargetModel)) {
+        Write-Host "  [OK] Target model '$TargetModel' is available." -ForegroundColor Green
     } else {
-        $TargetModel = "qwen3:8b"
-        Write-Host "  [*] No models found. Pulling '$TargetModel' (may take several minutes)..." -ForegroundColor Yellow
+        Write-Host "  [*] Model '$TargetModel' not found. Pulling '$TargetModel' (may take a minute)..." -ForegroundColor Yellow
         & $OllamaCmd pull $TargetModel
         Write-Host "  [OK] Model '$TargetModel' pulled successfully." -ForegroundColor Green
     }
@@ -463,6 +465,7 @@ if ($UseGPU) {
         --gpus all `
         -p 8000:8000 `
         -p 11434:11434 `
+        -e OLLAMA_MODEL="qwen2.5:7b" `
         -v "${VectorstoreFull}:/app/vectorstore" `
         -v "${OllamaHostDir}:/root/.ollama" `
         -v "${HfHostDir}:/root/.cache/huggingface" `
@@ -474,6 +477,8 @@ if ($UseGPU) {
         --name pdf-chatbot-v2 `
         -p 8000:8000 `
         -p 11434:11434 `
+        -e FORCE_CPU="1" `
+        -e OLLAMA_MODEL="qwen2.5:1.5b" `
         -e CUDA_VISIBLE_DEVICES="" `
         -e OLLAMA_NUM_GPU=0 `
         -v "${VectorstoreFull}:/app/vectorstore" `

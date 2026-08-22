@@ -70,35 +70,44 @@ def detect_device() -> str:
     Logs detailed hardware info on first call.
 
     Returns:
-        "cuda" if an NVIDIA GPU with CUDA is available, else "cpu".
+        "cuda" if an NVIDIA GPU with CUDA is available and not forced to CPU, else "cpu".
     """
     logger = logging.getLogger("pdf_chatbot_v2.hardware")
 
-    try:
-        import torch
+    import os
+    force_cpu = (
+        os.getenv("FORCE_CPU", "0").lower() in ("1", "true", "yes")
+        or os.getenv("CUDA_VISIBLE_DEVICES") == ""
+    )
 
-        if torch.cuda.is_available():
-            gpu_name = torch.cuda.get_device_name(0)
-            vram_total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-            vram_free = (
-                torch.cuda.get_device_properties(0).total_memory
-                - torch.cuda.memory_reserved(0)
-            ) / (1024 ** 3)
-            cuda_version = torch.version.cuda
+    if not force_cpu:
+        try:
+            import torch
 
-            logger.info("=" * 60)
-            logger.info("🟢 GPU DETECTED — CUDA acceleration enabled")
-            logger.info(f"   GPU Name       : {gpu_name}")
-            logger.info(f"   VRAM Total     : {vram_total:.1f} GiB")
-            logger.info(f"   VRAM Available : {vram_free:.1f} GiB")
-            logger.info(f"   CUDA Version   : {cuda_version}")
-            logger.info(f"   PyTorch Version: {torch.__version__}")
-            logger.info("=" * 60)
-            return "cuda"
-        else:
-            logger.info("No CUDA GPU detected, falling back to CPU.")
-    except ImportError:
-        logger.warning("PyTorch not installed — cannot detect GPU. Using CPU.")
+            if torch.cuda.is_available():
+                gpu_name = torch.cuda.get_device_name(0)
+                vram_total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                vram_free = (
+                    torch.cuda.get_device_properties(0).total_memory
+                    - torch.cuda.memory_reserved(0)
+                ) / (1024 ** 3)
+                cuda_version = torch.version.cuda
+
+                logger.info("=" * 60)
+                logger.info("🟢 GPU DETECTED — CUDA acceleration enabled")
+                logger.info(f"   GPU Name       : {gpu_name}")
+                logger.info(f"   VRAM Total     : {vram_total:.1f} GiB")
+                logger.info(f"   VRAM Available : {vram_free:.1f} GiB")
+                logger.info(f"   CUDA Version   : {cuda_version}")
+                logger.info(f"   PyTorch Version: {torch.__version__}")
+                logger.info("=" * 60)
+                return "cuda"
+            else:
+                logger.info("No CUDA GPU detected, falling back to CPU.")
+        except ImportError:
+            logger.warning("PyTorch not installed — cannot detect GPU. Using CPU.")
+    else:
+        logger.info("⚡ CPU mode explicitly forced via environment variable.")
 
     # CPU path — log CPU details
     cpu_info = _get_cpu_info()

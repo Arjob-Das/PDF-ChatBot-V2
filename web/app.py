@@ -324,10 +324,16 @@ async def health_endpoint():
         except Exception:
             pass
 
+    profile = config.get_active_profile()
     return {
         "status": "healthy" if ollama_status == "connected" and retriever else "degraded",
+        "compute_mode": profile["mode_name"],
+        "is_cpu_mode": profile["is_cpu_mode"],
         "ollama": ollama_status,
         "model": model_name,
+        "context_window": config.OLLAMA_CONTEXT_WINDOW,
+        "top_k": config.TOP_K,
+        "candidates": config.RETRIEVAL_CANDIDATES,
         "vectorstore_documents": vectorstore_count,
         "active_sessions": len(sessions),
         "hybrid_search": bool(retriever and retriever.bm25),

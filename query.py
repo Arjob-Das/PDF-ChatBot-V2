@@ -56,9 +56,23 @@ with deep cloud-native engineering and platform knowledge.
 Product & Architecture Context:
 - Aurelis Command Center (ACC) is an enterprise cloud-native network management platform deployed across Kubernetes
   clusters using Helm charts, containerized microservices (web UI, topology/inventory, alarm analyzer, authentication,
-  device adapters), message queues (Kafka), and databases (Redis, PostgreSQL/MongoDB).
+  device adapters), message queues (Kafka), and databases (MariaDB/MaxScale, Redis, PostgreSQL/MongoDB).
 - The ACC WebUI is a client-side Single Page Application (SPA) communicating via REST APIs and WebSockets to underlying
   Kubernetes backend service pods.
+- Installation Architecture:
+  * Software Prerequisites: Supported Linux (Ubuntu 22.04/24.04, RHEL 8.x/9.x), Python 3.8-3.12, pip3, and Ansible (v2.9 to v2.16).
+  * Online Guided Installer: Relies on host-level Ansible and upstream repository access. If errors regarding missing
+    Ansible packages occur, it indicates missing OS prerequisites, missing pip dependencies, or lack of upstream repository access.
+    Resolution requires installing Ansible via the OS package manager (`apt install -y ansible python3-pip` or `dnf install -y ansible python3-pip`)
+    or using the airgapped Offline Installer package (`aurelis_install.bin`) which bundles all dependencies.
+- Geo-Redundancy & High Availability Architecture:
+  * In Active-Standby / Disaster Recovery (Cold or Warm Standby), the Active site runs all operational microservice pods.
+  * In the Standby site, only data/database replication components (MariaDB MaxScale replication, Cross-Cluster Replication)
+    are active. The main application workload pods remain in a dormant / not running / scaled-down status by design to prevent
+    split-brain and write conflicts.
+  * Application pods on the standby site transition to active/running state only during a planned or disaster switchover.
+  * Seeing application pods not running on the standby site is normal and expected design behavior if replication is healthy
+    (`maxscale_adm --verify-datacenter-replication` returns OK) and no geo-redundancy replication alarms exist.
 
 Core Diagnostic & Response Rules:
 1. End-to-End Holistic Triage (Full-Picture System Understanding):
@@ -71,7 +85,7 @@ Core Diagnostic & Response Rules:
      c. Browser / Client Diagnostics: Check Browser Developer Tools (F12 Console for JavaScript errors; Network tab for
         HTTP 500/502/504 errors or failed WebSocket `/ws` connections), and try clearing session/browser cache.
      d. Authorization / RBAC: Verify that the user's role profile in ACC User Management has view/read permissions.
-     e. Documented Alternative Routes: Mention alternative deep-link navigation routes if documented in ACC (e.g.,
+     f. Documented Alternative Routes: Mention alternative deep-link navigation routes if documented in ACC (e.g.,
         accessing topology via ONT View or Alarm Analyzer popups).
 2. Logical Precondition & Sanity Validation (CRITICAL):
    - NEVER tell a user to navigate or click inside a view, menu, or page that they reported is inaccessible, broken,
@@ -640,13 +654,15 @@ class ChatEngine:
         self.memory = ConversationMemory()
 
         hybrid_status = "Enabled (BM25 + Vector + RRF)" if self.retriever.bm25 else "Vector Only"
+        profile = config.get_active_profile()
         self.console.print(
             Panel(
                 f"[bold green]✅ Ready![/bold green]\n"
+                f"⚡ Mode: [bold cyan]{profile['mode_name']}[/bold cyan]\n"
                 f"📄 [bold]{self.retriever.count()}[/bold] document chunks indexed\n"
                 f"🤖 Model: [bold]{config.OLLAMA_MODEL}[/bold] (Context: {config.OLLAMA_CONTEXT_WINDOW} tokens)\n"
-                f"🔍 Retrieval: [bold]{hybrid_status}[/bold]\n"
-                f"🎯 Top-K: [bold]{self.top_k}[/bold]\n\n"
+                f"🔍 Retrieval: [bold]{hybrid_status}[/bold] (Candidates: {config.RETRIEVAL_CANDIDATES})\n"
+                f"🎯 Top-K: [bold]{self.top_k}[/bold] | Timeout: {config.OLLAMA_TIMEOUT}s\n\n"
                 f"Type your question or /help for commands.",
                 title="[bold]System Status[/bold]",
                 border_style="green",
