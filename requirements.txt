@@ -1,0 +1,41 @@
+# PDF-Chatbot-V2 — Dependencies
+# ===============================
+# Lightweight, high-performance RAG pipeline for software development knowledge.
+# Install: pip install -r requirements.txt
+#
+# Key differences from PDF Chatbot 1:
+#   - Drops EasyOCR + opencv-python-headless (~1.2 GB savings)
+#   - Adds rank-bm25 for hybrid retrieval
+#   - Adds ragas for standardized evaluation
+#   - Adds rapidocr-onnxruntime for lightweight OCR
+
+# --- PDF Processing ---
+PyMuPDF>=1.24.0                 # Fast C-based PDF text extraction (import fitz)
+
+# --- Text Splitting ---
+langchain-text-splitters>=0.2.0 # RecursiveCharacterTextSplitter
+
+# --- Embeddings ---
+sentence-transformers>=3.0.0    # nomic-embed-text-v1.5 model runner
+torch>=2.0.0                    # Device detection (CUDA / CPU)
+einops>=0.8.0                   # Required by nomic-embed-text for rotary embeddings
+
+# --- Vector Store ---
+chromadb>=0.5.0                 # Local persistent vector database
+
+# --- BM25 Sparse Retrieval (NEW) ---
+rank-bm25>=0.2.2                # Okapi BM25 for keyword-based retrieval
+
+# --- HTTP (Ollama API) ---
+requests>=2.31.0                # Ollama REST API calls
+
+# --- CLI & UX ---
+rich>=13.0.0                    # Beautiful terminal output
+tqdm>=4.66.0                    # Progress bars for batch ingestion
+
+# --- Testing & Evaluation ---
+numpy>=1.24.0                   # Cosine similarity, scoring
+ragas>=0.2.0                    # RAG evaluation framework (faithfulness, precision, relevancy)
+
+# --- OCR Support (Lightweight) ---
+rapidocr-onnxruntime>=1.4.0     # ONNX-based OCR (replaces EasyOCR — 10x smaller, faster on CPU)
