@@ -42,8 +42,8 @@ ensure_directories()
 # ──────────────────────────────────────────────
 # Ingestion — Text Splitting (Structure-Aware)
 # ──────────────────────────────────────────────
-CHUNK_SIZE = 512            # Characters per chunk (fine-grained precision)
-CHUNK_OVERLAP = 64          # Overlap between consecutive chunks
+CHUNK_SIZE = 1000           # Characters per chunk (preserves full paragraphs and multi-step procedures)
+CHUNK_OVERLAP = 150         # Overlap between consecutive chunks (prevents severed context)
 BATCH_SIZE = 10             # PDFs processed per batch (OOM guard)
 CODE_BLOCK_AWARE = True     # Respect code fences, indentation, and structure boundaries
 
@@ -66,14 +66,14 @@ COLLECTION_NAME = "pdf_chatbot_v2"
 OLLAMA_MODEL = "qwen3:8b"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_TIMEOUT = 120                     # Seconds per generation request
-OLLAMA_CONTEXT_WINDOW = 32768            # Extended context window
+OLLAMA_CONTEXT_WINDOW = 8192             # 8K context: fits 100% in VRAM, eliminating CPU offload & maximizing speed
 
 # ──────────────────────────────────────────────
 # Retrieval — Hybrid (BM25 + Vector + RRF)
 # ──────────────────────────────────────────────
-TOP_K = 8                                # Final number of context chunks passed to LLM
+TOP_K = 10                               # Final number of context chunks passed to LLM
 USE_HYBRID_SEARCH = True                 # Enable BM25 + Vector fusion
-RETRIEVAL_CANDIDATES = 60                # Raw candidate pool depth per retriever
+RETRIEVAL_CANDIDATES = 80                # Raw candidate pool depth per retriever
 VECTOR_WEIGHT = 0.5                      # Semantic vector contribution in RRF
 BM25_WEIGHT = 0.5                        # Keyword BM25 contribution in RRF
 RRF_K = 60                               # Reciprocal Rank Fusion constant

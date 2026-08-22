@@ -84,13 +84,21 @@ desktop.ini
 hf_cache/
 models/
 huggingface/
+.ollama/
 
 # --- Scratch & Testing Artifacts ---
 scratch/
 scratch_*.py
 *.tmp
+*.png
+*.webp
+*.zip
+comparison_report.md
+vectorstore_export.zip
 
 # --- Docker ---
 .dockerignore
 docker-data/
 *.tar
+pdf_chatbot_ollama/
+pdf_chatbot_huggingface/

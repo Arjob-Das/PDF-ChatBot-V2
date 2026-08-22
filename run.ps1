@@ -20,15 +20,28 @@
 #   .\run.ps1 --no-browser     # Don't auto-open browser at the end
 # =============================================================================
 
-param(
-    [switch]$SkipIngest,
-    [switch]$Reset,
-    [switch]$NoDocker,
-    [Alias('Cli')][switch]$Local,
-    [switch]$NoBrowser,
-    [string]$PdfDir = "",
-    [int]$BatchSize = 0
-)
+$SkipIngest = $false
+$Reset = $false
+$NoDocker = $false
+$Local = $false
+$NoBrowser = $false
+$ForceCPU = $false
+$PdfDir = ""
+$BatchSize = 0
+
+for ($i = 0; $i -lt $args.Count; $i++) {
+    switch -Regex ($args[$i]) {
+        '^-{1,2}skip-ingest$' { $SkipIngest = $true }
+        '^-{1,2}reset$'       { $Reset = $true }
+        '^-{1,2}no-docker$'   { $NoDocker = $true }
+        '^-{1,2}local$'       { $Local = $true }
+        '^-{1,2}cli$'         { $Local = $true }
+        '^-{1,2}no-browser$'  { $NoBrowser = $true }
+        '^-{1,2}cpu$'         { $ForceCPU = $true }
+        '^-{1,2}pdf-dir$'     { if ($i + 1 -lt $args.Count) { $i++; $PdfDir = $args[$i] } }
+        '^-{1,2}batch-size$'  { if ($i + 1 -lt $args.Count) { $i++; $BatchSize = [int]$args[$i] } }
+    }
+}
 
 $ErrorActionPreference = "Stop"
 
@@ -395,7 +408,7 @@ if (-not (Test-Path (Join-Path $ScriptDir "vectorstore\bm25_index.pkl"))) {
 
 # 6d. Build image
 Write-Host "  [*] Building 'pdf-chatbot-v2:latest'..." -ForegroundColor Yellow
-docker build -f Dockerfile.serve -t pdf-chatbot-v2:latest .
+$env:DOCKER_BUILDKIT=1; docker build -f Dockerfile.serve -t pdf-chatbot-v2:latest .
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  [ERROR] Docker build failed. Check Dockerfile.serve." -ForegroundColor Red
@@ -418,7 +431,9 @@ if ($ExistingContainer) {
 
 # 7b. Detect GPU
 $UseGPU = $false
-if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+if ($ForceCPU) {
+    Write-Host "  [*] CPU mode requested via --cpu flag." -ForegroundColor Yellow
+} elseif (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
     try {
         nvidia-smi 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) { $UseGPU = $true }
@@ -436,6 +451,10 @@ if ($OllamaRunning) {
 
 # 7d. Run container
 $VectorstoreFull = (Resolve-Path (Join-Path $ScriptDir "vectorstore")).Path
+$OllamaHostDir = Join-Path $env:USERPROFILE ".ollama"
+if (-not (Test-Path $OllamaHostDir)) { New-Item -ItemType Directory -Path $OllamaHostDir -Force | Out-Null }
+$HfHostDir = Join-Path $env:USERPROFILE ".cache\huggingface"
+if (-not (Test-Path $HfHostDir)) { New-Item -ItemType Directory -Path $HfHostDir -Force | Out-Null }
 
 if ($UseGPU) {
     Write-Host "  [*] Starting with GPU acceleration..." -ForegroundColor Green
@@ -445,15 +464,21 @@ if ($UseGPU) {
         -p 8000:8000 `
         -p 11434:11434 `
         -v "${VectorstoreFull}:/app/vectorstore" `
+        -v "${OllamaHostDir}:/root/.ollama" `
+        -v "${HfHostDir}:/root/.cache/huggingface" `
         --restart unless-stopped `
         pdf-chatbot-v2:latest
 } else {
-    Write-Host "  [*] Starting in CPU mode..." -ForegroundColor Yellow
+    Write-Host "  [*] Starting in CPU-only mode..." -ForegroundColor Yellow
     docker run -d `
         --name pdf-chatbot-v2 `
         -p 8000:8000 `
         -p 11434:11434 `
+        -e CUDA_VISIBLE_DEVICES="" `
+        -e OLLAMA_NUM_GPU=0 `
         -v "${VectorstoreFull}:/app/vectorstore" `
+        -v "${OllamaHostDir}:/root/.ollama" `
+        -v "${HfHostDir}:/root/.cache/huggingface" `
         --restart unless-stopped `
         pdf-chatbot-v2:latest
 }
@@ -466,7 +491,7 @@ if ($LASTEXITCODE -ne 0) {
 # 7e. Wait for services to come up
 Write-Host "  [*] Waiting for services (Ollama model pull + FastAPI startup)..." -ForegroundColor Yellow
 $WebReady = $false
-$MaxWait = 180
+$MaxWait = 600
 $Waited = 0
 
 while ($Waited -lt $MaxWait -and -not $WebReady) {

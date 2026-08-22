@@ -140,14 +140,8 @@ def _get_cpu_info() -> dict:
         except Exception:
             pass
 
-        # AVX2 detection via torch
-        try:
-            import torch
-
-            # torch doesn't expose AVX2 directly; check struct size as proxy
-            info["avx2"] = "Likely (64-bit Python)" if struct.calcsize("P") == 8 else "Unknown"
-        except ImportError:
-            pass
+        # AVX2 capability proxy (64-bit Python architecture)
+        info["avx2"] = "Likely (64-bit Python)" if struct.calcsize("P") == 8 else "Unknown"
     else:
         # Linux — read /proc/cpuinfo
         try:

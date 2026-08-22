@@ -23,10 +23,9 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -209,6 +208,7 @@ async def chat_endpoint(request: ChatRequest):
                 "stream": True,
                 "options": {
                     "num_ctx": config.OLLAMA_CONTEXT_WINDOW,
+                    "num_predict": 1536,
                     "temperature": 0.3,
                     "top_p": 0.9,
                     "repeat_penalty": 1.1,

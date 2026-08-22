@@ -88,7 +88,7 @@ With V2, you can interact with your documents via a **Premium Web Chatbot UI** (
 - **Dual-Indexing Hybrid Retrieval:** Combines semantic vector search with sparse keyword search (BM25) using RRF.
 - **Cross-Encoder Re-ranking:** Utilizes `mixedbread-ai/mxbai-rerank-xsmall-v1` to score semantic relevance before context generation.
 - **Structure-Aware Chunking:** Intelligently respects code fences, markdown tables, headings, and indentation structures.
-- **Dockerized Serving:** Easily deploy the inference engine and web UI in a self-contained environment using `docker-compose`.
+- **Dockerized Serving with BuildKit Caching:** Deploy the inference engine and web UI in a self-contained environment. Subsequent builds are extremely fast thanks to persistent `apt` and `pip` local cache mounts.
 - **FastAPI Web Server:** SSE streaming endpoints that connect your local model to a beautiful, reactive front-end.
 - **Hardware Acceleration:** Auto-detects NVIDIA CUDA GPU with VRAM monitoring and graceful fallback to optimized CPU execution.
 
@@ -167,39 +167,47 @@ By default, the script trains your data locally, builds a Docker image, and laun
 
 ### Launcher Execution Modes:
 
-```bash
-# 1. Default Mode (Train → Build Docker → Launch Web UI)
+```powershell
+# 1. Default Mode (Train → Build Docker with BuildKit cache → Launch Web UI with GPU)
 .\run.ps1
 
-# 2. CLI Mode (Train → Launch Interactive Terminal, skips Docker/Web)
+# 2. CPU-Only Mode (Forces container or local execution to run strictly on CPU)
+.\run.ps1 --cpu
+
+# 3. CLI Mode (Train → Launch Interactive Terminal, skips Docker/Web)
 .\run.ps1 -cli
 
-# 3. Local Web Mode (Train → Launch Local Web Server, skips Docker)
+# 4. Local Web Mode (Train → Launch Local Web Server, skips Docker)
 .\run.ps1 --no-docker
 
-# 4. Retrain Mode (Wipe existing indexes and start fresh)
+# 5. Retrain Mode (Wipe existing indexes and re-ingest all PDFs with optimized chunking)
 .\run.ps1 --reset
 
-# 5. Skip Ingestion (Skip training, just start the chatbot with existing data)
+# 6. Skip Ingestion (Skip training, just start the chatbot with existing data)
 .\run.ps1 --skip-ingest
+
+# 7. No Browser (Start container in background without auto-launching browser)
+.\run.ps1 --no-browser
 ```
 
 *(On Linux/macOS, use `./run.sh` with the same flags).*
 
 ---
 
-## 🛠️ Master Launchers
+## 🛠️ Master Launchers & Caching Strategy
 
 The `run.ps1` and `run.sh` scripts are powerful end-to-end orchestrators. They handle:
 1. Validating project directories.
 2. Installing Python 3.10+ (if missing) and setting up a `venv`.
-3. Installing PyTorch with CUDA support if an NVIDIA GPU is detected.
-4. Setting up Ollama, verifying the daemon, and pulling the required models (`qwen3:8b`).
-5. Running the local document ingestion pipeline via `ingest.py`.
-6. Building the `Dockerfile.serve` Docker image.
-7. Starting the container with GPU passthrough and launching the UI in your browser.
-
-If Docker is not installed, the script **automatically falls back** to running the FastAPI web server locally using your host Python and Ollama installation.
+3. Installing PyTorch with CUDA support if an NVIDIA GPU is detected (or PyTorch CPU if `--cpu` is specified).
+4. Setting up Ollama, verifying the daemon, and ensuring model availability (`qwen3:8b`).
+5. Running the local document ingestion pipeline via `ingest.py` (structure-aware 1000-char chunks).
+6. Building the `Dockerfile.serve` Docker image using Docker BuildKit cache mounts (`/var/cache/apt` and `/root/.cache/pip`), making rebuilds complete in under 2 seconds.
+7. Starting the container with GPU passthrough (or CPU mode when `--cpu` is specified) with persistent host cache volume mounts:
+   - `-v "${VectorstoreFull}:/app/vectorstore"` (ChromaDB + BM25 indexes)
+   - `-v "${USERPROFILE}/.ollama:/root/.ollama"` (Cached LLM weights shared with host)
+   - `-v "${USERPROFILE}/.cache/huggingface:/root/.cache/huggingface"` (Cached embedding & re-ranker weights shared with host)
+8. Launching the web UI at `http://localhost:8000`.
 
 ---
 
@@ -224,9 +232,9 @@ time.sleep(5)
 ```
 4. Upload your PDFs to `data/pdfs/` and run training:
 ```python
-!python ingest.py
+!python ingest.py --reset
 ```
-5. Export your trained `vectorstore/` index back to your local machine for fast CPU querying.
+5. Export your trained `vectorstore/` index back to your local machine for fast querying.
 
 ---
 
@@ -242,7 +250,7 @@ python ingest.py --no-ocr          # Ingest without OCR
 ```
 
 ### 2. Interactive Terminal (`query.py`)
-The classic interactive terminal with streaming and memory.
+The classic interactive terminal with streaming, memory, and multi-PDF synthesis.
 ```bash
 python query.py
 python query.py --query "How do I configure network settings?"
@@ -268,14 +276,15 @@ All pipeline hyperparameters can be customized in [`config.py`](config.py):
 
 | Parameter | Default Value | Description |
 | :--- | :---: | :--- |
-| **`CHUNK_SIZE`** | `512` | Character length target per chunk |
-| **`CHUNK_OVERLAP`** | `64` | Overlap character count between consecutive chunks |
-| **`EMBEDDING_MODEL`** | `"nomic-ai/nomic-embed-text-v1.5"` | HuggingFace embedding model |
+| **`CHUNK_SIZE`** | `1000` | Target character length per chunk (preserves complete procedures) |
+| **`CHUNK_OVERLAP`** | `150` | Overlap character count between consecutive chunks |
+| **`EMBEDDING_MODEL`** | `"nomic-ai/nomic-embed-text-v1.5"` | HuggingFace embedding model (768-dim) |
 | **`OLLAMA_MODEL`** | `"qwen3:8b"` | Primary Ollama model name |
-| **`OLLAMA_CONTEXT_WINDOW`** | `32768` | Context window size passed in Ollama options |
-| **`TOP_K`** | `8` | Number of final chunks presented to the LLM |
+| **`OLLAMA_CONTEXT_WINDOW`** | `8192` | 8K context window (fits 100% in VRAM, zero CPU offload) |
+| **`TOP_K`** | `10` | Number of final chunks presented to the LLM |
+| **`RETRIEVAL_CANDIDATES`** | `80` | Raw candidate pool depth per retriever before RRF & re-ranking |
 | **`VECTOR_WEIGHT`** | `0.5` | Dense vector contribution in Reciprocal Rank Fusion |
-| **`USE_RERANKER`** | `True` | Enables Cross-Encoder re-ranking |
+| **`USE_RERANKER`** | `True` | Enables Cross-Encoder re-ranking (`mxbai-rerank-xsmall-v1`) |
 | **`ENABLE_OCR`** | `True` | RapidOCR ONNX fallback for scanned pages |
 | **`SERVE_PORT`** | `8000` | FastAPI Web server port |
 

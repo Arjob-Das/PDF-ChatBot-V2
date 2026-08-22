@@ -16,11 +16,9 @@ Usage:
 """
 
 import argparse
-import logging
 import pickle
 import sys
 import time
-from pathlib import Path
 
 import chromadb
 import numpy as np
@@ -219,7 +217,10 @@ def test_embedding_benchmark(verbose: bool = False) -> dict:
 
         sample_texts = [
             f"{config.EMBEDDING_PREFIX}The quick brown fox jumps over the lazy dog.",
-            f"{config.EMBEDDING_PREFIX}def calculate_metrics(data: list) -> dict: return {{'mean': sum(data)/len(data)}}",
+            (
+                f"{config.EMBEDDING_PREFIX}def calculate_metrics(data: list) -> dict: "
+                "return {'mean': sum(data)/len(data)}"
+            ),
             f"{config.EMBEDDING_PREFIX}Docker container orchestration using Kubernetes pods and deployments.",
             f"{config.EMBEDDING_PREFIX}REST API design principles: idempotency, resource-oriented URIs, status codes.",
             f"{config.EMBEDDING_PREFIX}Instructional manual for configuring enterprise database connection pools.",

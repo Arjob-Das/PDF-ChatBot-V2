@@ -14,9 +14,6 @@ Usage:
 """
 
 import argparse
-import json
-import logging
-import sys
 import time
 from pathlib import Path
 
@@ -28,7 +25,7 @@ from rich.table import Table
 import config
 from benchmark import BENCHMARK_DATASET
 from query import OllamaClient, Retriever
-from utils import format_time, setup_logging
+from utils import setup_logging
 
 console = Console()
 
@@ -60,7 +57,7 @@ def evaluate_pipeline(
         f"\n**Timestamp:** {time.strftime('%Y-%m-%d %H:%M:%S')}",
         f"**Model:** `{config.OLLAMA_MODEL}` (Context: {config.OLLAMA_CONTEXT_WINDOW} tokens)",
         f"**Embedding:** `{config.EMBEDDING_MODEL}` ({config.EMBEDDING_DIMENSION}-dim)",
-        f"**Retrieval Strategy:** Hybrid (ChromaDB Vector + BM25 Sparse + RRF + Cross-Encoder)",
+        "**Retrieval Strategy:** Hybrid (ChromaDB Vector + BM25 Sparse + RRF + Cross-Encoder)",
         "\n---\n",
         "## Domain-by-Domain Metrics\n",
         "| # | Domain | Question | Precision | Faithfulness | Latency |",

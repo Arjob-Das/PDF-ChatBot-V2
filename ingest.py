@@ -645,7 +645,7 @@ def _print_report(stats: dict, total_in_store: int, logger: logging.Logger):
         logger.info(f"  Throughput       : {rate:.1f} PDFs/sec")
 
     if stats["errors"]:
-        logger.info(f"\n  ⚠ Errors ({len(stats['errors'])}):") 
+        logger.info(f"\n  ⚠ Errors ({len(stats['errors'])}):")
         for err in stats["errors"][:10]:  # Show first 10
             logger.info(f"    • {err}")
         if len(stats["errors"]) > 10:

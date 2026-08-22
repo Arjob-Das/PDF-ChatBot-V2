@@ -29,6 +29,7 @@ RESET=0
 NO_DOCKER=0
 LOCAL_MODE=0
 NO_BROWSER=0
+FORCE_CPU=0
 PDF_DIR=""
 BATCH_SIZE=0
 
@@ -39,6 +40,7 @@ while [[ $# -gt 0 ]]; do
         --no-docker)   NO_DOCKER=1; shift ;;
         --local|-cli|--cli) LOCAL_MODE=1; shift ;;
         --no-browser)  NO_BROWSER=1; shift ;;
+        --cpu|-cpu)    FORCE_CPU=1; shift ;;
         --pdf-dir)     PDF_DIR="$2"; shift 2 ;;
         --batch-size)  BATCH_SIZE="$2"; shift 2 ;;
         *) shift ;;
@@ -365,7 +367,7 @@ fi
 
 # 6d. Build image
 echo -e "  \033[1;33m[*] Building 'pdf-chatbot-v2:latest'...\033[0m"
-docker build -f Dockerfile.serve -t pdf-chatbot-v2:latest .
+DOCKER_BUILDKIT=1 docker build -f Dockerfile.serve -t pdf-chatbot-v2:latest .
 echo -e "  \033[0;32m[OK] Docker image built.\033[0m"
 
 # =============================================================================
@@ -382,7 +384,9 @@ fi
 
 # 7b. Detect GPU
 USE_GPU=false
-if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null; then
+if [ "$FORCE_CPU" -eq 1 ]; then
+    echo -e "  \033[1;33m[*] CPU-only mode requested via --cpu flag.\033[0m"
+elif command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null; then
     USE_GPU=true
 fi
 
@@ -395,6 +399,10 @@ fi
 
 # 7d. Run container
 VECTORSTORE_FULL="$(cd "$SCRIPT_DIR/vectorstore" && pwd)"
+OLLAMA_HOST_DIR="${HOME}/.ollama"
+mkdir -p "$OLLAMA_HOST_DIR"
+HF_HOST_DIR="${HOME}/.cache/huggingface"
+mkdir -p "$HF_HOST_DIR"
 
 if [ "$USE_GPU" = true ]; then
     echo -e "  \033[0;32m[*] Starting with GPU acceleration...\033[0m"
@@ -404,15 +412,21 @@ if [ "$USE_GPU" = true ]; then
         -p 8000:8000 \
         -p 11434:11434 \
         -v "$VECTORSTORE_FULL:/app/vectorstore" \
+        -v "$OLLAMA_HOST_DIR:/root/.ollama" \
+        -v "$HF_HOST_DIR:/root/.cache/huggingface" \
         --restart unless-stopped \
         pdf-chatbot-v2:latest
 else
-    echo -e "  \033[1;33m[*] Starting in CPU mode...\033[0m"
+    echo -e "  \033[1;33m[*] Starting in CPU-only mode...\033[0m"
     docker run -d \
         --name pdf-chatbot-v2 \
         -p 8000:8000 \
         -p 11434:11434 \
+        -e CUDA_VISIBLE_DEVICES="" \
+        -e OLLAMA_NUM_GPU=0 \
         -v "$VECTORSTORE_FULL:/app/vectorstore" \
+        -v "$OLLAMA_HOST_DIR:/root/.ollama" \
+        -v "$HF_HOST_DIR:/root/.cache/huggingface" \
         --restart unless-stopped \
         pdf-chatbot-v2:latest
 fi
@@ -420,7 +434,7 @@ fi
 # 7e. Wait for services
 echo -e "  \033[1;33m[*] Waiting for services (Ollama model pull + FastAPI startup)...\033[0m"
 WEB_READY=0
-MAX_WAIT=180
+MAX_WAIT=600
 WAITED=0
 
 while [ $WAITED -lt $MAX_WAIT ] && [ "$WEB_READY" -eq 0 ]; do

@@ -32,9 +32,7 @@ import argparse
 import json
 import logging
 import pickle
-import sys
 import time
-from pathlib import Path
 
 import chromadb
 import requests
@@ -45,26 +43,29 @@ from rich.table import Table
 from sentence_transformers import SentenceTransformer
 
 import config
-from utils import code_aware_tokenize, detect_device, format_time, setup_logging
+from utils import code_aware_tokenize, detect_device, setup_logging
 
 # ──────────────────────────────────────────────
 # Prompt Templates
 # ──────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a knowledgeable document assistant with deep technical expertise. Answer the user's question based on the provided context from their PDF documents.
+SYSTEM_PROMPT = """You are an expert AI document assistant with deep technical and architectural knowledge.
+Your job is to answer questions thoroughly and factually by synthesizing information across all relevant PDFs.
 
 Rules:
-1. Answer using ONLY the information provided in the Context section below. Do not invent information, hallucinate unrelated steps, or use ungrounded assumptions.
-2. Directly answer the user's specific problem:
-   - If the user asks about an error, troubleshooting step, or missing package/collection (e.g. Ansible collections, pip packages, Kubernetes plugins), provide the EXACT resolution commands and configuration steps found in the context.
-   - If the user has a minor typo in a package or module name (for example: 'common.general' instead of 'community.general'), identify the correct package name and command from the context.
-   - Distinguish between standard/online installation guides (e.g. Simpleinstallation.pdf) and offline airgapped procedures (e.g. Offlineinstaller.pdf) based on the user's specific request.
-3. For procedural or instructional documents, provide clear, step-by-step directions.
-4. When the context contains code, commands, or configurations (Python, Java, DevOps, Shell, Fullstack, etc.), reproduce them accurately with proper markdown formatting.
-5. If the retrieved context does not contain enough information to resolve the specific question or error, clearly state: "The indexed documents do not contain specific troubleshooting steps for this error, but related documents mention [summary of available context]."
-6. Cite the source document and page number when possible (e.g., "[Source: Simpleinstallation.pdf, Page 3]").
-7. Write in a natural, direct, and professional style.
-8. Multi-turn Isolation: Treat each new user question as distinct. If the user presents a new question, prompt, or error message, answer the new question directly. Never repeat or echo answers from previous turns unless explicitly asked to revisit them."""
+1. Answer using ONLY the information provided in the Context section below. Synthesize, correlate, and connect
+   information across different documents when relevant to give the user a complete picture of the product/system.
+2. Directly answer the user's specific problem or inquiry with high accuracy:
+   - Provide a comprehensive, structured overview when asked about architecture, purpose, or system workflows.
+   - For procedures, setup, or troubleshooting, provide exact step-by-step instructions and commands from the docs.
+   - Clearly distinguish between different modules, components, or installation modes (e.g. online vs offline).
+   - If the user asks about an error or missing module, provide the exact resolution commands from context.
+3. If information spans across multiple PDFs, explicitly correlate them and cite the corresponding source files
+   and page numbers (e.g., "[Source: IntroToCoreConcepts.pdf, Page 3]").
+4. When the context contains code, commands, or configurations (Python, Java, DevOps, Shell, Fullstack, YAML, etc.),
+   reproduce them accurately with proper markdown formatting.
+5. If the context does not contain enough information, state clearly what is known and what is missing.
+6. Multi-turn Isolation: Answer the user's latest question directly without regurgitating previous turn responses."""
 
 QUERY_TEMPLATE = """## Context (Retrieved from indexed PDFs for Current Question)
 {context}
@@ -546,7 +547,8 @@ class OllamaClient:
             "system": system,
             "stream": stream,
             "options": {
-                "num_ctx": config.OLLAMA_CONTEXT_WINDOW,  # 32768 context window
+                "num_ctx": config.OLLAMA_CONTEXT_WINDOW,  # 8192 context window (fits 100% in VRAM)
+                "num_predict": 1536,                      # Bounded generation prevents runaway loops
                 "temperature": 0.3,                       # Accurate factual grounding
                 "top_p": 0.9,
                 "repeat_penalty": 1.1,

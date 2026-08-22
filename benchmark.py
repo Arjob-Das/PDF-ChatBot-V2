@@ -24,10 +24,7 @@ Usage:
 """
 
 import argparse
-import logging
-import sys
 import time
-from pathlib import Path
 
 import numpy as np
 from rich.console import Console
@@ -35,7 +32,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 import config
-from utils import format_time, setup_logging
+from utils import setup_logging
 
 console = Console()
 

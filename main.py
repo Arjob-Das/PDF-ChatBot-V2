@@ -181,7 +181,8 @@ def main():
     console.print(
         Panel(
             "[bold green]Step 2/2: Launching Interactive Query Terminal[/bold green]\n"
-            "Type your questions naturally. Use [bold cyan]/help[/bold cyan] for available commands or [bold red]/quit[/bold red] to exit.",
+            "Type your questions naturally. Use [bold cyan]/help[/bold cyan] for available "
+            "commands or [bold red]/quit[/bold red] to exit.",
             border_style="green",
         )
     )

@@ -112,10 +112,16 @@
             display: flex;
             flex-direction: column;
             height: 100vh;
-            max-width: 900px;
+            width: 100%;
+            max-width: 1320px;
             margin: 0 auto;
             position: relative;
             z-index: 1;
+            overflow-x: hidden;
+            background: rgba(14, 14, 24, 0.6);
+            border-left: 1px solid var(--border-subtle);
+            border-right: 1px solid var(--border-subtle);
+            box-shadow: 0 0 60px rgba(0, 0, 0, 0.6);
         }
 
         /* ═══════════════════════════════════════════
@@ -231,14 +237,18 @@
         .messages-container {
             flex: 1;
             overflow-y: auto;
-            padding: 24px;
+            overflow-x: hidden;
+            padding: 24px 32px;
             scroll-behavior: smooth;
+            width: 100%;
         }
 
         .messages-inner {
             display: flex;
             flex-direction: column;
             gap: 20px;
+            width: 100%;
+            max-width: 100%;
         }
 
         /* Welcome Screen */
@@ -315,8 +325,9 @@
            ═══════════════════════════════════════════ */
         .message {
             display: flex;
-            gap: 10px;
-            max-width: 82%;
+            gap: 12px;
+            max-width: 90%;
+            min-width: 0;
             animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
@@ -330,13 +341,13 @@
         }
 
         .msg-avatar {
-            width: 30px;
-            height: 30px;
+            width: 32px;
+            height: 32px;
             border-radius: var(--radius-sm);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 14px;
+            font-size: 15px;
             flex-shrink: 0;
             margin-top: 2px;
         }
@@ -354,15 +365,20 @@
             display: flex;
             flex-direction: column;
             gap: 6px;
+            min-width: 0;
+            max-width: 100%;
+            flex: 1;
         }
 
         .msg-bubble {
-            padding: 12px 16px;
+            padding: 14px 18px;
             border-radius: var(--radius-lg);
-            font-size: 14px;
-            line-height: 1.65;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
+            font-size: 14.5px;
+            line-height: 1.68;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            min-width: 0;
+            max-width: 100%;
         }
 
         .message.user .msg-bubble {
@@ -552,22 +568,39 @@
             border-bottom-color: var(--text-accent);
         }
 
+        .table-wrapper {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: auto;
+            margin: 12px 0;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-glass);
+            background: rgba(10, 10, 15, 0.5);
+        }
+
         .msg-bubble table {
             width: 100%;
             border-collapse: collapse;
-            margin: 8px 0;
-            font-size: 13px;
+            margin: 0;
+            font-size: 13.5px;
         }
 
         .msg-bubble th, .msg-bubble td {
-            padding: 6px 10px;
+            padding: 9px 13px;
             border: 1px solid var(--border-subtle);
             text-align: left;
+            vertical-align: top;
         }
 
         .msg-bubble th {
-            background: rgba(99, 102, 241, 0.1);
+            background: rgba(99, 102, 241, 0.18);
+            color: var(--text-primary);
             font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .msg-bubble td {
+            color: var(--text-secondary);
         }
 
         /* ═══════════════════════════════════════════
@@ -869,7 +902,7 @@
     setInterval(checkHealth, 30000);
 
     /* ═══════════════════════════════════════════
-       Markdown Renderer (Lightweight)
+       Markdown Renderer (Lightweight & Full-Featured)
        ═══════════════════════════════════════════ */
     function renderMarkdown(text) {
         if (!text) return '';
@@ -879,6 +912,34 @@
         // Code blocks (``` ... ```)
         html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
             return `<pre><code class="language-${lang || 'text'}">${code.trim()}</code></pre>`;
+        });
+
+        // Markdown Tables (| col | col |)
+        html = html.replace(/(?:^\|.+?\|(?:\r?\n|$))+/gm, (tableMatch) => {
+            const rawLines = tableMatch.trim().split('\n').map(l => l.trim()).filter(Boolean);
+            if (rawLines.length < 2) return tableMatch;
+
+            let headerHtml = '';
+            let bodyHtml = '';
+            let isHeader = true;
+
+            for (let i = 0; i < rawLines.length; i++) {
+                const line = rawLines[i];
+                if (/^\|(?:\s*:?-+:?\s*\|)+$/.test(line)) {
+                    isHeader = false;
+                    continue;
+                }
+
+                const cells = line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+                if (isHeader && i === 0) {
+                    headerHtml = '<tr>' + cells.map(c => `<th>${c}</th>`).join('') + '</tr>';
+                } else {
+                    bodyHtml += '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
+                }
+            }
+
+            if (!headerHtml && !bodyHtml) return tableMatch;
+            return `<div class="table-wrapper"><table>${headerHtml ? `<thead>${headerHtml}</thead>` : ''}<tbody>${bodyHtml}</tbody></table></div>`;
         });
 
         // Inline code
@@ -914,8 +975,12 @@
         // Single newlines within paragraphs
         html = html.replace(/\n/g, '<br>');
 
+        // Clean up any extra <br> right after/before block elements
+        html = html.replace(/<\/(h[1-3]|ul|ol|pre|div|table|blockquote)><br>/gi, '</$1>');
+        html = html.replace(/<br><(h[1-3]|ul|ol|pre|div|table|blockquote)/gi, '<$1');
+
         // Wrap in paragraph if not already wrapped
-        if (!html.startsWith('<h') && !html.startsWith('<ul') && !html.startsWith('<pre') && !html.startsWith('<blockquote')) {
+        if (!html.startsWith('<h') && !html.startsWith('<ul') && !html.startsWith('<pre') && !html.startsWith('<div') && !html.startsWith('<blockquote')) {
             html = '<p>' + html + '</p>';
         }
 
@@ -1060,6 +1125,12 @@
                                 fullText += data.token;
                                 bubble.innerHTML = renderMarkdown(fullText);
                                 scrollToBottom();
+                            }
+                            if (data.sources) {
+                                sources = data.sources;
+                            }
+                            if (data.elapsed) {
+                                meta.elapsed = data.elapsed;
                             }
                         } catch {
                             // Skip malformed JSON
